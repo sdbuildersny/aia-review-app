@@ -1,5 +1,5 @@
 """
-AIA G703 Pay App Checker — Excel/CSV Only, Batch Upload
+AIA G703 Pay App Checker — Excel/CSV Only, Batch Upload (All Formats)
 """
 
 import streamlit as st
@@ -42,12 +42,16 @@ def parse_file(file, prev_column="Previous Amount Billed", completed_column="Tot
     try:
         if file.name.endswith(".csv"):
             df = pd.read_csv(file)
-        else:
-            df = pd.read_excel(file)
+        elif file.name.endswith(".xls"):
+            df = pd.read_excel(file, engine="xlrd")
+        else:  # xlsx
+            df = pd.read_excel(file, engine="openpyxl")
+        
         # Check columns
         if prev_column not in df.columns or completed_column not in df.columns:
             st.error(f"{file.name} missing required columns: {prev_column} or {completed_column}")
             return None, None
+        
         prev_total = df[prev_column].sum()
         completed_total = df[completed_column].sum()
         return prev_total, completed_total
