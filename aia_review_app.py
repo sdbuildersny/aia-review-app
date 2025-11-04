@@ -1,17 +1,16 @@
 """
-AIA G703 Pay App Checker — Excel Only, Batch Upload
+AIA G703 Pay App Checker — Excel/CSV Only, Batch Upload
 """
 
 import streamlit as st
 import pandas as pd
 import openai
-import os
 
-st.title("AIA G703 Pay App Checker — Batch Excel")
+st.title("AIA G703 Pay App Checker — Batch Upload")
 st.write(
-    "Upload one or more previous and current G703 Excel files. "
-    "The app checks if the 'Total Completed to Date' from previous pay apps matches "
-    "the 'Previous Amount Billed' in current pay apps."
+    "Upload one or more previous and current G703 Excel/CSV files. "
+    "The app checks if 'Total Completed to Date' from previous pay apps matches "
+    "'Previous Amount Billed' in current pay apps."
 )
 
 # ---------------------
@@ -26,26 +25,34 @@ except KeyError:
 # File uploads
 # ---------------------
 prev_files = st.file_uploader(
-    "Previous G703 Excel files (multiple allowed)", type=["xlsx"], accept_multiple_files=True
+    "Previous G703 Excel/CSV files (multiple allowed)", 
+    type=["xls", "xlsx", "csv"], 
+    accept_multiple_files=True
 )
 curr_files = st.file_uploader(
-    "Current G703 Excel files (multiple allowed)", type=["xlsx"], accept_multiple_files=True
+    "Current G703 Excel/CSV files (multiple allowed)", 
+    type=["xls", "xlsx", "csv"], 
+    accept_multiple_files=True
 )
 
 # ---------------------
-# Excel parser
+# Universal parser
 # ---------------------
-def parse_excel(file, prev_column="Previous Amount Billed", completed_column="Total Completed to Date"):
+def parse_file(file, prev_column="Previous Amount Billed", completed_column="Total Completed to Date"):
     try:
-        df = pd.read_excel(file)
+        if file.name.endswith(".csv"):
+            df = pd.read_csv(file)
+        else:
+            df = pd.read_excel(file)
+        # Check columns
         if prev_column not in df.columns or completed_column not in df.columns:
-            st.error(f"Excel file {file.name} missing required columns: {prev_column} or {completed_column}")
+            st.error(f"{file.name} missing required columns: {prev_column} or {completed_column}")
             return None, None
         prev_total = df[prev_column].sum()
         completed_total = df[completed_column].sum()
         return prev_total, completed_total
     except Exception as e:
-        st.error(f"Error parsing Excel {file.name}: {e}")
+        st.error(f"Error parsing {file.name}: {e}")
         return None, None
 
 # ---------------------
@@ -59,8 +66,8 @@ if prev_files and curr_files:
         st.warning("Number of previous and current files must match for comparison.")
     else:
         for prev_file, curr_file in zip(prev_files, curr_files):
-            prev_total, _ = parse_excel(prev_file)
-            curr_prev_total, _ = parse_excel(curr_file)
+            _, prev_total = parse_file(prev_file)
+            curr_prev_total, _ = parse_file(curr_file)
 
             if prev_total is not None and curr_prev_total is not None:
                 match = abs(prev_total - curr_prev_total) < 0.01
@@ -101,4 +108,4 @@ if results:
         except Exception as e:
             st.error(f"Error generating AI summary: {e}")
 else:
-    st.info("Upload previous and current G703 Excel files to see results.")
+    st.info("Upload previous and current G703 Excel/CSV files to see results.")
