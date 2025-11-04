@@ -8,7 +8,6 @@ import re
 import openai
 
 st.title("AIA G703 Pay App Checker")
-
 st.write(
     "Upload previous and current G703 PDFs or Excel files. "
     "The app checks if the total completed to date from the previous pay app matches "
@@ -30,69 +29,103 @@ prev_file = st.file_uploader("Previous G703 Pay App (PDF or Excel)", type=["pdf"
 curr_file = st.file_uploader("Current G703 Pay App (PDF or Excel)", type=["pdf", "xlsx"])
 
 # ---------------------
-# PDF parsing helper
+# PDF parser using header positions
 # ---------------------
-def parse_pdf_g703_total(file, column="Total Completed to Date"):
+def parse_g703_pdf(file):
     """
-    Sum numbers from a PDF G703 based on column:
-    - 'Previous Amount Billed' -> first number in line
-    - 'Total Completed to Date' -> third number in line
+    Extracts and sums:
+    - Previous Amount Billed
+    - Total Completed to Date
+    from a G703 PDF using header positions.
+    Returns a tuple: (previous_total, completed_total)
     """
-    total = 0
-    column_index = 0 if column == "Previous Amount Billed" else 2
     try:
         import pdfplumber
+        prev_total = 0
+        completed_total = 0
         with pdfplumber.open(file) as pdf:
             for page in pdf.pages:
                 text = page.extract_text()
                 if not text:
                     continue
-                for line in text.split("\n"):
-                    # Extract numbers from line
-                    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", line.replace(",", ""))
-                    if len(numbers) > column_index:
+                lines = text.split("\n")
+                header_idx = None
+                col_positions = {}
+                
+                # Detect header line containing keywords
+                for i, line in enumerate(lines):
+                    if "Previous" in line and "Completed" in line:
+                        header_idx = i
+                        # Get approximate start positions of each column
+                        for col_name in ["Previous", "Completed"]:
+                            pos = line.find(col_name)
+                            if pos >= 0:
+                                col_positions[col_name] = pos
+                        break
+                
+                if header_idx is None:
+                    continue
+                
+                # Process lines below header
+                for line in lines[header_idx + 1:]:
+                    if not line.strip():
+                        continue
+                    # Previous Amount Billed
+                    if "Previous" in col_positions:
+                        start = col_positions["Previous"]
+                        end = col_positions.get("Completed", None)
+                        prev_text = line[start:end].strip() if end else line[start:].strip()
+                        prev_text = prev_text.replace(",", "").replace("$", "")
                         try:
-                            total += float(numbers[column_index])
+                            prev_total += float(prev_text)
                         except:
                             continue
-        return total
+                    # Total Completed to Date
+                    if "Completed" in col_positions:
+                        start = col_positions["Completed"]
+                        completed_text = line[start:].strip().replace(",", "").replace("$", "")
+                        try:
+                            completed_total += float(completed_text)
+                        except:
+                            continue
+        return prev_total, completed_total
     except Exception as e:
-        st.error(f"Error parsing PDF: {e}")
-        return None
+        st.error(f"Error parsing G703 PDF: {e}")
+        return None, None
 
 # ---------------------
-# Excel parsing helper
+# Excel parser
 # ---------------------
-def parse_excel_column_sum(file, column_name):
+def parse_excel(file, prev_column="Previous Amount Billed", completed_column="Total Completed to Date"):
     try:
         df = pd.read_excel(file)
-        if column_name not in df.columns:
-            st.error(f"Excel missing required column: {column_name}")
-            return None
-        return df[column_name].sum()
+        if prev_column not in df.columns or completed_column not in df.columns:
+            st.error(f"Excel file missing required columns: {prev_column} or {completed_column}")
+            return None, None
+        prev_total = df[prev_column].sum()
+        completed_total = df[completed_column].sum()
+        return prev_total, completed_total
     except Exception as e:
         st.error(f"Error parsing Excel: {e}")
-        return None
+        return None, None
 
 # ---------------------
-# Determine totals
+# Compute totals
 # ---------------------
 prev_total = None
 curr_prev_total = None
 
-# Previous pay app → Total Completed to Date
 if prev_file:
     if prev_file.type == "application/pdf":
-        prev_total = parse_pdf_g703_total(prev_file, column="Total Completed to Date")
+        _, prev_total = parse_g703_pdf(prev_file)
     else:
-        prev_total = parse_excel_column_sum(prev_file, column_name="Total Completed to Date")
+        _, prev_total = parse_excel(prev_file)
 
-# Current pay app → Previous Amount Billed
 if curr_file:
     if curr_file.type == "application/pdf":
-        curr_prev_total = parse_pdf_g703_total(curr_file, column="Previous Amount Billed")
+        curr_prev_total, _ = parse_g703_pdf(curr_file)
     else:
-        curr_prev_total = parse_excel_column_sum(curr_file, column_name="Previous Amount Billed")
+        curr_prev_total, _ = parse_excel(curr_file)
 
 # ---------------------
 # Display results
@@ -104,25 +137,3 @@ if prev_total is not None and curr_prev_total is not None:
     if abs(prev_total - curr_prev_total) < 0.01:
         st.success("✅ Totals match!")
     else:
-        st.error("❌ Totals do NOT match!")
-
-        # Optional AI explanation
-        try:
-            ai_input = f"""
-            Check if the total completed to date from the previous pay app matches
-            the previous amount billed in the current pay app.
-
-            Total Completed to Date (Previous G703): {prev_total:,.2f}
-            Previous Amount Billed (Current G703): {curr_prev_total:,.2f}
-
-            Explain if they match, and if not, provide recommendations for the reviewer.
-            """
-            response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": ai_input}],
-                max_tokens=200
-            )
-            st.markdown("### AI Summary")
-            st.write(response.choices[0].message.content)
-        except Exception as e:
-            st.error(f"Error generating AI summary: {e}")
