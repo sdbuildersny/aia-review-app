@@ -8,9 +8,9 @@ import openai
 
 st.title("AIA G703 Pay App Checker — Batch Upload")
 st.write(
-    "Upload one or more previous and current G703 Excel/CSV files. "
-    "The app checks if 'Total Completed to Date' from previous pay apps matches "
-    "'Previous Amount Billed' in current pay apps."
+    "Upload previous and current G703 Excel/CSV files. "
+    "The app checks if 'Total Completed and Stored to Date' from previous pay apps "
+    "matches 'Previous Applications' in current pay apps."
 )
 
 # ---------------------
@@ -38,7 +38,7 @@ curr_files = st.file_uploader(
 # ---------------------
 # Universal parser
 # ---------------------
-def parse_file(file, prev_column="Previous Amount Billed", completed_column="Total Completed to Date"):
+def parse_file(file, prev_column=None, completed_column=None):
     try:
         if file.name.endswith(".csv"):
             df = pd.read_csv(file)
@@ -47,13 +47,16 @@ def parse_file(file, prev_column="Previous Amount Billed", completed_column="Tot
         else:  # xlsx
             df = pd.read_excel(file, engine="openpyxl")
         
-        # Check columns
-        if prev_column not in df.columns or completed_column not in df.columns:
-            st.error(f"{file.name} missing required columns: {prev_column} or {completed_column}")
+        # If column names are provided, use them; otherwise defaults
+        if prev_column and prev_column not in df.columns:
+            st.error(f"{file.name} missing required column: {prev_column}")
+            return None, None
+        if completed_column and completed_column not in df.columns:
+            st.error(f"{file.name} missing required column: {completed_column}")
             return None, None
         
-        prev_total = df[prev_column].sum()
-        completed_total = df[completed_column].sum()
+        prev_total = df[prev_column].sum() if prev_column else None
+        completed_total = df[completed_column].sum() if completed_column else None
         return prev_total, completed_total
     except Exception as e:
         st.error(f"Error parsing {file.name}: {e}")
@@ -70,16 +73,18 @@ if prev_files and curr_files:
         st.warning("Number of previous and current files must match for comparison.")
     else:
         for prev_file, curr_file in zip(prev_files, curr_files):
-            _, prev_total = parse_file(prev_file)
-            curr_prev_total, _ = parse_file(curr_file)
+            # Previous file uses "Total Completed and Stored to Date"
+            _, prev_total = parse_file(prev_file, completed_column="Total Completed and Stored to Date")
+            # Current file uses "Previous Applications"
+            curr_prev_total, _ = parse_file(curr_file, prev_column="Previous Applications")
 
             if prev_total is not None and curr_prev_total is not None:
                 match = abs(prev_total - curr_prev_total) < 0.01
                 results.append({
                     "Previous File": prev_file.name,
                     "Current File": curr_file.name,
-                    "Total Completed to Date (Prev)": prev_total,
-                    "Previous Amount Billed (Curr)": curr_prev_total,
+                    "Total Completed and Stored to Date (Prev)": prev_total,
+                    "Previous Applications (Curr)": curr_prev_total,
                     "Match": "✅" if match else "❌"
                 })
 
@@ -89,8 +94,8 @@ if prev_files and curr_files:
 if results:
     df_results = pd.DataFrame(results)
     # Format numbers
-    df_results["Total Completed to Date (Prev)"] = df_results["Total Completed to Date (Prev)"].map(lambda x: f"{x:,.2f}")
-    df_results["Previous Amount Billed (Curr)"] = df_results["Previous Amount Billed (Curr)"].map(lambda x: f"{x:,.2f}")
+    df_results["Total Completed and Stored to Date (Prev)"] = df_results["Total Completed and Stored to Date (Prev)"].map(lambda x: f"{x:,.2f}")
+    df_results["Previous Applications (Curr)"] = df_results["Previous Applications (Curr)"].map(lambda x: f"{x:,.2f}")
     st.dataframe(df_results)
 
     # Optional AI summary for mismatches
@@ -99,7 +104,7 @@ if results:
         try:
             ai_input = "Review the following G703 pay apps mismatches:\n"
             for m in mismatches:
-                ai_input += f"{m['Previous File']} vs {m['Current File']}: Prev Total = {m['Total Completed to Date (Prev)']}, Curr Previous = {m['Previous Amount Billed (Curr)']}\n"
+                ai_input += f"{m['Previous File']} vs {m['Current File']}: Prev Total = {m['Total Completed and Stored to Date (Prev)']}, Curr Previous = {m['Previous Applications (Curr)']}\n"
             ai_input += "Explain possible reasons for mismatches and recommendations."
 
             response = openai.chat.completions.create(
