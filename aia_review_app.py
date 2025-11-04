@@ -1,22 +1,22 @@
 """
-AIA Pay App Checker — Previous Amount Billed Match Only
+AIA Pay App Checker — Total Completed vs Previous Amount Billed
 """
 
 import streamlit as st
 import pdfplumber
 import pandas as pd
-import re
 import openai
 
-st.title("AIA Pay App Checker — Previous Amount Billed Match")
+st.title("AIA Pay App Checker — G703 Totals Match")
 
 st.write(
-    "Upload the previous pay app and the current pay app (PDF or Excel). "
-    "The app will check if the total billed on the previous pay app matches the 'Previous' column on the current pay app."
+    "Upload previous and current AIA G703 PDFs or Excel files. "
+    "The app checks if the total completed to date from the previous pay app matches "
+    "the previous amount billed in the current pay app."
 )
 
 # ---------------------
-# Set OpenAI API key
+# OpenAI API key
 # ---------------------
 try:
     openai.api_key = st.secrets["OPENAI_API_KEY"]
@@ -24,108 +24,92 @@ except KeyError:
     st.warning("OpenAI API key not found! Please add OPENAI_API_KEY in Streamlit Secrets.")
 
 # ---------------------
-# Upload files
+# File uploads
 # ---------------------
-prev_file = st.file_uploader("Previous Pay App (PDF or Excel)", type=["pdf", "xlsx"])
-curr_file = st.file_uploader("Current Pay App (PDF or Excel)", type=["pdf", "xlsx"])
+prev_file = st.file_uploader("Previous G703 Pay App (PDF or Excel)", type=["pdf", "xlsx"])
+curr_file = st.file_uploader("Current G703 Pay App (PDF or Excel)", type=["pdf", "xlsx"])
 
 # ---------------------
-# Helper functions to parse PDF and Excel
+# PDF parsing helpers
 # ---------------------
-def parse_pdf_total(file):
+def parse_pdf_column_sum(file, column_index):
+    """Sum values from a specific column index across all lines in all pages."""
+    total = 0
     try:
-        total = 0
         with pdfplumber.open(file) as pdf:
             for page in pdf.pages:
-                text = page.extract_text()
-                if not text:
-                    continue
-                for line in text.split("\n"):
-                    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", line)
-                    if len(numbers) >= 3:
-                        total += float(numbers[2])  # Take the Total column
+                table = page.extract_table()
+                if table:
+                    for row in table[1:]:  # skip header
+                        if row[column_index]:
+                            try:
+                                total += float(row[column_index].replace(",", "").replace("$", ""))
+                            except:
+                                pass
         return total
     except Exception as e:
         st.error(f"Error parsing PDF: {e}")
         return None
 
-def parse_excel_total(file):
+# ---------------------
+# Excel parsing helpers
+# ---------------------
+def parse_excel_column_sum(file, column_name):
     try:
         df = pd.read_excel(file)
-        if "Total" not in df.columns:
-            st.error("Excel file missing 'Total' column")
+        if column_name not in df.columns:
+            st.error(f"Excel missing required column: {column_name}")
             return None
-        return df["Total"].sum()
+        return df[column_name].sum()
     except Exception as e:
         st.error(f"Error parsing Excel: {e}")
         return None
 
-def parse_file_total(file):
-    if file is None:
-        return None
-    if file.type == "application/pdf":
-        return parse_pdf_total(file)
-    elif file.type in ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       "application/vnd.ms-excel"]:
-        return parse_excel_total(file)
-    else:
-        st.error("Unsupported file type")
-        return None
-
 # ---------------------
-# Compute totals
+# Determine totals
 # ---------------------
-prev_total = parse_file_total(prev_file)
+prev_total = None
 curr_prev_total = None
 
-if prev_total is not None and curr_file is not None:
-    # Parse the 'Previous' column from current pay app
-    try:
-        if curr_file.type == "application/pdf":
-            curr_total = 0
-            with pdfplumber.open(curr_file) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if not text:
-                        continue
-                    for line in text.split("\n"):
-                        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", line)
-                        if len(numbers) >= 1:
-                            curr_total += float(numbers[0])  # Previous column
-            curr_prev_total = curr_total
-        elif curr_file.type in ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                "application/vnd.ms-excel"]:
-            df = pd.read_excel(curr_file)
-            if "Previous" not in df.columns:
-                st.error("Current Excel file missing 'Previous' column")
-            else:
-                curr_prev_total = df["Previous"].sum()
-    except Exception as e:
-        st.error(f"Error parsing current file: {e}")
+# Previous pay app → Total Completed to Date
+if prev_file:
+    if prev_file.type == "application/pdf":
+        # G703 typically has "Total Completed to Date" in 3rd column (index 2)
+        prev_total = parse_pdf_column_sum(prev_file, column_index=2)
+    else:
+        prev_total = parse_excel_column_sum(prev_file, column_name="Total Completed to Date")
+
+# Current pay app → Previous Amount Billed
+if curr_file:
+    if curr_file.type == "application/pdf":
+        # G703 typically has "Previous Amount Billed" in 1st column (index 0)
+        curr_prev_total = parse_pdf_column_sum(curr_file, column_index=0)
+    else:
+        curr_prev_total = parse_excel_column_sum(curr_file, column_name="Previous Amount Billed")
 
 # ---------------------
 # Display results
 # ---------------------
 if prev_total is not None and curr_prev_total is not None:
-    st.write(f"**Total from previous pay app:** {prev_total:,.2f}")
-    st.write(f"**Previous column total from current pay app:** {curr_prev_total:,.2f}")
+    st.write(f"**Total Completed to Date (Previous G703):** {prev_total:,.2f}")
+    st.write(f"**Previous Amount Billed (Current G703):** {curr_prev_total:,.2f}")
 
     if abs(prev_total - curr_prev_total) < 0.01:
         st.success("✅ Totals match!")
     else:
         st.error("❌ Totals do NOT match!")
 
-        # Optional: AI explanation
+        # Optional AI explanation
         try:
             ai_input = f"""
-            Check the previous pay app total vs the previous column total in the current pay app:
+            Check if the total completed to date from the previous pay app matches
+            the previous amount billed in the current pay app.
 
-            Previous pay app total: {prev_total:,.2f}
-            Current pay app 'Previous' total: {curr_prev_total:,.2f}
+            Total Completed to Date (Previous G703): {prev_total:,.2f}
+            Previous Amount Billed (Current G703): {curr_prev_total:,.2f}
 
-            Explain if they match and if not, provide recommendations for the reviewer.
+            Explain if they match, and if not, provide recommendations for the reviewer.
             """
-
             response = openai.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": ai_input}],
@@ -133,6 +117,5 @@ if prev_total is not None and curr_prev_total is not None:
             )
             st.markdown("### AI Summary")
             st.write(response.choices[0].message.content)
-
         except Exception as e:
             st.error(f"Error generating AI summary: {e}")
