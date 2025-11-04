@@ -1,5 +1,5 @@
 """
-AIA Pay App Reviewer — Streamlit Prototype with AI Summary
+AIA Pay App Reviewer — Streamlit Prototype with AI Summary (OpenAI 1.x+ compatible)
 
 This app allows you to:
 - Upload previous and current AIA G702/G703 PDFs
@@ -43,7 +43,6 @@ def parse_pdf(file):
                 text = page.extract_text()
                 if not text:
                     continue
-                # Very basic parsing; replace with structured table parsing as needed
                 lines = text.split("\n")
                 for line in lines:
                     # Example heuristic: lines with numbers
@@ -82,14 +81,14 @@ if prev_file and curr_file:
 
             ai_input = f"{user_prompt}\n\nData summary:\n{pdf_data_summary}"
 
-            # Call OpenAI API
-            response = openai.ChatCompletion.create(
+            # --------- NEW OpenAI 1.x+ API ---------
+            response = openai.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": ai_input}],
                 max_tokens=300
             )
 
-            ai_summary = response['choices'][0]['message']['content']
+            ai_summary = response.choices[0].message.content
             st.markdown("### AI Review Summary")
             st.write(ai_summary)
 
