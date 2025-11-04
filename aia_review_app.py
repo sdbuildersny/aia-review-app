@@ -137,3 +137,25 @@ if prev_total is not None and curr_prev_total is not None:
     if abs(prev_total - curr_prev_total) < 0.01:
         st.success("✅ Totals match!")
     else:
+        st.error("❌ Totals do NOT match!")
+
+        # Optional AI explanation
+        try:
+            ai_input = f"""
+            Check if the total completed to date from the previous pay app matches
+            the previous amount billed in the current pay app.
+
+            Total Completed to Date (Previous G703): {prev_total:,.2f}
+            Previous Amount Billed (Current G703): {curr_prev_total:,.2f}
+
+            Explain if they match, and if not, provide recommendations for the reviewer.
+            """
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": ai_input}],
+                max_tokens=200
+            )
+            st.markdown("### AI Summary")
+            st.write(response.choices[0].message.content)
+        except Exception as e:
+            st.error(f"Error generating AI summary: {e}")
