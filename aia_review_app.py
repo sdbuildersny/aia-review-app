@@ -1,5 +1,5 @@
 """
-AIA Pay App Reviewer — Streamlit Prototype with AI Summary (Streamlit Secrets + OpenAI 1.x+)
+AIA Pay App Reviewer — Streamlit Prototype with AI Summary (GPT-3.5 + Streamlit Secrets)
 
 This app allows you to:
 - Upload previous and current AIA G702/G703 PDFs
@@ -88,9 +88,9 @@ if prev_file and curr_file:
 
             ai_input = f"{user_prompt}\n\nData summary:\n{pdf_data_summary}"
 
-            # OpenAI 1.x+ API
+            # GPT-3.5 API
             response = openai.chat.completions.create(
-                model="gpt-4",
+                model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": ai_input}],
                 max_tokens=300
             )
@@ -109,9 +109,10 @@ st.markdown(
     """
 **Notes:**
 - Make sure your OpenAI API key is set in Streamlit Secrets (`OPENAI_API_KEY`).
-- The AI summary is based on a simplified extracted data overview; for full accuracy, you can expand `pdf_data_summary` with parsed table details.
+- The AI summary is based on a simplified extracted data overview; for full accuracy, consider expanding `pdf_data_summary` with parsed table details.
 - This prototype can be extended to automatically compare line items, validate rollovers, and export results to CSV or Sage Intacct.
 """
 )
+
 
 
