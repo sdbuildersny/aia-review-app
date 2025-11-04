@@ -1,17 +1,17 @@
 """
-AIA G703 Pay App Checker — Total Completed vs Previous Amount Billed
+AIA G703 Pay App Checker — Excel Only, Batch Upload
 """
 
 import streamlit as st
 import pandas as pd
-import re
 import openai
+import os
 
-st.title("AIA G703 Pay App Checker")
+st.title("AIA G703 Pay App Checker — Batch Excel")
 st.write(
-    "Upload previous and current G703 PDFs or Excel files. "
-    "The app checks if the total completed to date from the previous pay app matches "
-    "the previous amount billed in the current pay app."
+    "Upload one or more previous and current G703 Excel files. "
+    "The app checks if the 'Total Completed to Date' from previous pay apps matches "
+    "the 'Previous Amount Billed' in current pay apps."
 )
 
 # ---------------------
@@ -25,73 +25,12 @@ except KeyError:
 # ---------------------
 # File uploads
 # ---------------------
-prev_file = st.file_uploader("Previous G703 Pay App (PDF or Excel)", type=["pdf", "xlsx"])
-curr_file = st.file_uploader("Current G703 Pay App (PDF or Excel)", type=["pdf", "xlsx"])
-
-# ---------------------
-# PDF parser using header positions
-# ---------------------
-def parse_g703_pdf(file):
-    """
-    Extracts and sums:
-    - Previous Amount Billed
-    - Total Completed to Date
-    from a G703 PDF using header positions.
-    Returns a tuple: (previous_total, completed_total)
-    """
-    try:
-        import pdfplumber
-        prev_total = 0
-        completed_total = 0
-        with pdfplumber.open(file) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if not text:
-                    continue
-                lines = text.split("\n")
-                header_idx = None
-                col_positions = {}
-                
-                # Detect header line containing keywords
-                for i, line in enumerate(lines):
-                    if "Previous" in line and "Completed" in line:
-                        header_idx = i
-                        # Get approximate start positions of each column
-                        for col_name in ["Previous", "Completed"]:
-                            pos = line.find(col_name)
-                            if pos >= 0:
-                                col_positions[col_name] = pos
-                        break
-                
-                if header_idx is None:
-                    continue
-                
-                # Process lines below header
-                for line in lines[header_idx + 1:]:
-                    if not line.strip():
-                        continue
-                    # Previous Amount Billed
-                    if "Previous" in col_positions:
-                        start = col_positions["Previous"]
-                        end = col_positions.get("Completed", None)
-                        prev_text = line[start:end].strip() if end else line[start:].strip()
-                        prev_text = prev_text.replace(",", "").replace("$", "")
-                        try:
-                            prev_total += float(prev_text)
-                        except:
-                            continue
-                    # Total Completed to Date
-                    if "Completed" in col_positions:
-                        start = col_positions["Completed"]
-                        completed_text = line[start:].strip().replace(",", "").replace("$", "")
-                        try:
-                            completed_total += float(completed_text)
-                        except:
-                            continue
-        return prev_total, completed_total
-    except Exception as e:
-        st.error(f"Error parsing G703 PDF: {e}")
-        return None, None
+prev_files = st.file_uploader(
+    "Previous G703 Excel files (multiple allowed)", type=["xlsx"], accept_multiple_files=True
+)
+curr_files = st.file_uploader(
+    "Current G703 Excel files (multiple allowed)", type=["xlsx"], accept_multiple_files=True
+)
 
 # ---------------------
 # Excel parser
@@ -100,62 +39,66 @@ def parse_excel(file, prev_column="Previous Amount Billed", completed_column="To
     try:
         df = pd.read_excel(file)
         if prev_column not in df.columns or completed_column not in df.columns:
-            st.error(f"Excel file missing required columns: {prev_column} or {completed_column}")
+            st.error(f"Excel file {file.name} missing required columns: {prev_column} or {completed_column}")
             return None, None
         prev_total = df[prev_column].sum()
         completed_total = df[completed_column].sum()
         return prev_total, completed_total
     except Exception as e:
-        st.error(f"Error parsing Excel: {e}")
+        st.error(f"Error parsing Excel {file.name}: {e}")
         return None, None
 
 # ---------------------
-# Compute totals
+# Process all files
 # ---------------------
-prev_total = None
-curr_prev_total = None
+results = []
 
-if prev_file:
-    if prev_file.type == "application/pdf":
-        _, prev_total = parse_g703_pdf(prev_file)
+if prev_files and curr_files:
+    # Ensure same number of previous and current files
+    if len(prev_files) != len(curr_files):
+        st.warning("Number of previous and current files must match for comparison.")
     else:
-        _, prev_total = parse_excel(prev_file)
+        for prev_file, curr_file in zip(prev_files, curr_files):
+            prev_total, _ = parse_excel(prev_file)
+            curr_prev_total, _ = parse_excel(curr_file)
 
-if curr_file:
-    if curr_file.type == "application/pdf":
-        curr_prev_total, _ = parse_g703_pdf(curr_file)
-    else:
-        curr_prev_total, _ = parse_excel(curr_file)
+            if prev_total is not None and curr_prev_total is not None:
+                match = abs(prev_total - curr_prev_total) < 0.01
+                results.append({
+                    "Previous File": prev_file.name,
+                    "Current File": curr_file.name,
+                    "Total Completed to Date (Prev)": prev_total,
+                    "Previous Amount Billed (Curr)": curr_prev_total,
+                    "Match": "✅" if match else "❌"
+                })
 
 # ---------------------
 # Display results
 # ---------------------
-if prev_total is not None and curr_prev_total is not None:
-    st.write(f"**Total Completed to Date (Previous G703):** {prev_total:,.2f}")
-    st.write(f"**Previous Amount Billed (Current G703):** {curr_prev_total:,.2f}")
+if results:
+    df_results = pd.DataFrame(results)
+    # Format numbers
+    df_results["Total Completed to Date (Prev)"] = df_results["Total Completed to Date (Prev)"].map(lambda x: f"{x:,.2f}")
+    df_results["Previous Amount Billed (Curr)"] = df_results["Previous Amount Billed (Curr)"].map(lambda x: f"{x:,.2f}")
+    st.dataframe(df_results)
 
-    if abs(prev_total - curr_prev_total) < 0.01:
-        st.success("✅ Totals match!")
-    else:
-        st.error("❌ Totals do NOT match!")
-
-        # Optional AI explanation
+    # Optional AI summary for mismatches
+    mismatches = [r for r in results if r["Match"] == "❌"]
+    if mismatches:
         try:
-            ai_input = f"""
-            Check if the total completed to date from the previous pay app matches
-            the previous amount billed in the current pay app.
+            ai_input = "Review the following G703 pay apps mismatches:\n"
+            for m in mismatches:
+                ai_input += f"{m['Previous File']} vs {m['Current File']}: Prev Total = {m['Total Completed to Date (Prev)']}, Curr Previous = {m['Previous Amount Billed (Curr)']}\n"
+            ai_input += "Explain possible reasons for mismatches and recommendations."
 
-            Total Completed to Date (Previous G703): {prev_total:,.2f}
-            Previous Amount Billed (Current G703): {curr_prev_total:,.2f}
-
-            Explain if they match, and if not, provide recommendations for the reviewer.
-            """
             response = openai.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": ai_input}],
-                max_tokens=200
+                max_tokens=300
             )
-            st.markdown("### AI Summary")
+            st.markdown("### AI Summary for Mismatches")
             st.write(response.choices[0].message.content)
         except Exception as e:
             st.error(f"Error generating AI summary: {e}")
+else:
+    st.info("Upload previous and current G703 Excel files to see results.")
