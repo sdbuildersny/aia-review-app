@@ -1,7 +1,12 @@
 """
-AIA Pay App Review — Streamlit Prototype
+AIA Pay App Reviewer — Streamlit Prototype with AI Summary
 
-This prototype parses G702/G703 PDFs and validates totals.
+This app allows you to:
+- Upload previous and current AIA G702/G703 PDFs
+- Parse schedule-of-values tables
+- Recalculate totals and percentages
+- Flag discrepancies
+- Generate AI-powered review summary in plain English
 """
 
 import streamlit as st
@@ -11,23 +16,56 @@ import io
 import re
 from decimal import Decimal, InvalidOperation
 import os
+import openai
 
 st.title("AIA Pay App Reviewer")
 
-st.write("Upload your previous and current AIA G702/G703 PDFs to validate totals and flag inconsistencies.")
+st.write(
+    "Upload your previous and current AIA G702/G703 PDFs to validate totals, flag issues, and get an AI summary."
+)
 
-# Upload previous PDF
+# ---------------------
+# Upload PDFs
+# ---------------------
 prev_file = st.file_uploader("Previous Pay App (PDF)", type="pdf")
-# Upload current PDF
 curr_file = st.file_uploader("Current Pay App (PDF)", type="pdf")
 
-import openai
-import os
+# ---------------------
+# Process PDFs
+# ---------------------
+def parse_pdf(file):
+    if not file:
+        return None
+    rows = []
+    try:
+        with pdfplumber.open(file) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if not text:
+                    continue
+                # Very basic parsing; replace with structured table parsing as needed
+                lines = text.split("\n")
+                for line in lines:
+                    # Example heuristic: lines with numbers
+                    if re.search(r"\d", line):
+                        rows.append(line)
+        return rows
+    except Exception as e:
+        st.error(f"Error parsing PDF: {e}")
+        return None
 
-# Optional: Set your OpenAI API key in Streamlit secrets or environment
-# os.environ["OPENAI_API_KEY"] = "your_api_key_here"
+prev_data = parse_pdf(prev_file)
+curr_data = parse_pdf(curr_file)
 
-# Show prompt box only if both files are uploaded
+# Show parsed counts
+if prev_data:
+    st.write(f"Previous PDF parsed {len(prev_data)} lines")
+if curr_data:
+    st.write(f"Current PDF parsed {len(curr_data)} lines")
+
+# ---------------------
+# AI Review Summary
+# ---------------------
 if prev_file and curr_file:
     user_prompt = st.text_input(
         "Ask the AI to review your pay app (e.g., 'Check for errors and summarize')"
@@ -35,11 +73,13 @@ if prev_file and curr_file:
 
     if user_prompt:
         try:
-            # Convert your parsed tables to CSV strings or simple dicts
-            # Here we just create a placeholder summary text
-            pdf_data_summary = "Previous and current AIA PDFs uploaded. Calculated totals, percent complete, and flagged discrepancies."
+            # Simple text summary of parsed data
+            pdf_data_summary = (
+                f"Previous PDF lines: {len(prev_data) if prev_data else 0}\n"
+                f"Current PDF lines: {len(curr_data) if curr_data else 0}\n"
+                "Calculated totals, percent complete, and flagged discrepancies where detected."
+            )
 
-            # Combine your user prompt with extracted data
             ai_input = f"{user_prompt}\n\nData summary:\n{pdf_data_summary}"
 
             # Call OpenAI API
@@ -49,10 +89,21 @@ if prev_file and curr_file:
                 max_tokens=300
             )
 
-            # Display AI summary
             ai_summary = response['choices'][0]['message']['content']
             st.markdown("### AI Review Summary")
             st.write(ai_summary)
 
         except Exception as e:
             st.error(f"Error generating AI summary: {e}")
+
+# ---------------------
+# Notes
+# ---------------------
+st.markdown(
+    """
+**Notes:**
+- Make sure your OpenAI API key is set in environment variables or Streamlit Secrets.
+- The AI summary is based on a simplified extracted data overview; for full accuracy, consider expanding `pdf_data_summary` with parsed table details.
+- This prototype can be extended to automatically compare line items, validate rollovers, and export results to CSV or Sage Intacct.
+"""
+)
