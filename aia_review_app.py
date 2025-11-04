@@ -1,5 +1,5 @@
 """
-AIA Pay App Reviewer — Subtotal-Level Analysis
+AIA Pay App Reviewer — Subtotal-Level Analysis with Number Formatting
 """
 
 import streamlit as st
@@ -11,7 +11,7 @@ import openai
 st.title("AIA Pay App Reviewer — Subtotal Analysis")
 
 st.write(
-    "Upload previous and current AIA PDFs or Excel files to validate subtotals, flag section-level issues, and get an AI summary."
+    "Upload previous and current AIA PDFs or Excel files to validate subtotals, flag issues, and get an AI summary."
 )
 
 # ---------------------
@@ -29,7 +29,7 @@ prev_file = st.file_uploader("Previous Pay App (PDF or Excel)", type=["pdf", "xl
 curr_file = st.file_uploader("Current Pay App (PDF or Excel)", type=["pdf", "xlsx"])
 
 # ---------------------
-# Parse PDF
+# Helper: parse PDF
 # ---------------------
 def parse_pdf(file):
     rows = []
@@ -41,7 +41,7 @@ def parse_pdf(file):
                 if not text:
                     continue
                 for line in text.split("\n"):
-                    # Detect section header (heuristic: all caps, short)
+                    # Detect section header (all caps, short)
                     if line.isupper() and len(line.split()) <= 5:
                         section = line.strip()
                         continue
@@ -65,12 +65,11 @@ def parse_pdf(file):
         return None
 
 # ---------------------
-# Parse Excel
+# Helper: parse Excel
 # ---------------------
 def parse_excel(file):
     try:
         df = pd.read_excel(file)
-        # Ensure required columns exist
         required_cols = ["Section", "Previous", "This Period", "Total"]
         for col in required_cols:
             if col not in df.columns:
@@ -101,6 +100,7 @@ def parse_file(file):
 prev_df = parse_file(prev_file)
 curr_df = parse_file(curr_file)
 
+# Show parsed counts
 if prev_df is not None:
     st.write(f"Previous file parsed {len(prev_df)} rows")
 if curr_df is not None:
@@ -135,7 +135,19 @@ def merge_subtotals(prev, curr):
 
 merged_subtotals = merge_subtotals(prev_subtotals, curr_subtotals)
 
+# ---------------------
+# Format numeric columns
+# ---------------------
+def format_numbers(df):
+    num_cols = ["Previous_prev", "This Period_curr", "Total_curr", "% Complete_prev", "% Complete_curr"]
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "")
+    return df
+
 if merged_subtotals is not None:
+    merged_subtotals = format_numbers(merged_subtotals)
+
     # Highlight flagged sections
     def highlight_flags(row):
         color = ""
@@ -146,12 +158,12 @@ if merged_subtotals is not None:
     st.write("Merged subtotals with flagged mismatches (highlighted in red):")
     st.dataframe(merged_subtotals.style.apply(highlight_flags, axis=1))
 
-    # CSV download
+    # CSV download (numbers formatted)
     csv = merged_subtotals.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download flagged subtotals as CSV",
         data=csv,
-        file_name="merged_aia_subtotals.csv",
+        file_name="merged_aia_subtotals_formatted.csv",
         mime="text/csv"
     )
 
@@ -165,7 +177,6 @@ if prev_file and curr_file:
 
     if user_prompt and openai.api_key and merged_subtotals is not None:
         try:
-            # Prepare text for AI (all sections)
             table_text = merged_subtotals.to_string(index=False)
             ai_input = f"""
             {user_prompt}
@@ -198,8 +209,9 @@ if prev_file and curr_file:
 st.markdown(
     """
 **Notes:**
-- This version summarizes at the section/subtotal level instead of individual line items.
+- All numeric columns are now formatted as standard accounting numbers (e.g., 10,000.00).
+- This version summarizes at the section/subtotal level.
 - Mismatched subtotals and % complete inconsistencies are highlighted in red.
-- CSV download contains subtotal-level data for easy review or Sage Intacct import.
+- CSV download contains formatted subtotal-level data.
 """
 )
