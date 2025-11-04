@@ -1,5 +1,5 @@
 """
-AIA Pay App Reviewer — Subtotal-Level Analysis with Number Formatting
+AIA Pay App Reviewer — Subtotal-Level Analysis with PDF/Excel, Formatted Numbers, and AI Summary
 """
 
 import streamlit as st
@@ -11,7 +11,7 @@ import openai
 st.title("AIA Pay App Reviewer — Subtotal Analysis")
 
 st.write(
-    "Upload previous and current AIA PDFs or Excel files to validate subtotals, flag issues, and get an AI summary."
+    "Upload previous and current AIA PDFs or Excel files to validate subtotals, flag section-level issues, and get an AI summary."
 )
 
 # ---------------------
@@ -29,7 +29,7 @@ prev_file = st.file_uploader("Previous Pay App (PDF or Excel)", type=["pdf", "xl
 curr_file = st.file_uploader("Current Pay App (PDF or Excel)", type=["pdf", "xlsx"])
 
 # ---------------------
-# Helper: parse PDF
+# Parse PDF
 # ---------------------
 def parse_pdf(file):
     rows = []
@@ -65,7 +65,7 @@ def parse_pdf(file):
         return None
 
 # ---------------------
-# Helper: parse Excel
+# Parse Excel
 # ---------------------
 def parse_excel(file):
     try:
@@ -142,7 +142,7 @@ def format_numbers(df):
     num_cols = ["Previous_prev", "This Period_curr", "Total_curr", "% Complete_prev", "% Complete_curr"]
     for col in num_cols:
         if col in df.columns:
-            df[col] = df[col].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "")
+            df[col] = df[col].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) and x != "" else "")
     return df
 
 if merged_subtotals is not None:
@@ -168,7 +168,7 @@ if merged_subtotals is not None:
     )
 
 # ---------------------
-# AI summary for subtotals
+# AI summary for subtotals (with formatted numbers)
 # ---------------------
 if prev_file and curr_file:
     user_prompt = st.text_input(
@@ -177,11 +177,20 @@ if prev_file and curr_file:
 
     if user_prompt and openai.api_key and merged_subtotals is not None:
         try:
-            table_text = merged_subtotals.to_string(index=False)
+            # Create a copy with formatted numbers for AI
+            ai_df = merged_subtotals.copy()
+            num_cols = ["Previous_prev", "This Period_curr", "Total_curr", "% Complete_prev", "% Complete_curr"]
+            for col in num_cols:
+                if col in ai_df.columns:
+                    ai_df[col] = ai_df[col].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) and x != "" else "")
+
+            # Convert to string for AI input
+            table_text = ai_df.to_string(index=False)
+
             ai_input = f"""
             {user_prompt}
 
-            Here is the pay app subtotal data by section:
+            Here is the pay app subtotal data by section (numbers formatted in standard accounting style):
 
             {table_text}
 
@@ -197,7 +206,7 @@ if prev_file and curr_file:
                 max_tokens=400
             )
             ai_summary = response.choices[0].message.content
-            st.markdown("### AI Review Summary (Subtotal-Level)")
+            st.markdown("### AI Review Summary (Subtotal-Level, Formatted Numbers)")
             st.write(ai_summary)
 
         except Exception as e:
@@ -209,9 +218,10 @@ if prev_file and curr_file:
 st.markdown(
     """
 **Notes:**
-- All numeric columns are now formatted as standard accounting numbers (e.g., 10,000.00).
-- This version summarizes at the section/subtotal level.
+- All numeric columns are formatted as standard accounting numbers (e.g., 10,000.00).
+- Subtotal-level analysis is used instead of individual line items.
 - Mismatched subtotals and % complete inconsistencies are highlighted in red.
 - CSV download contains formatted subtotal-level data.
+- AI summary now references formatted numbers for readability.
 """
 )
