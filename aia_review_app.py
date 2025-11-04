@@ -1,16 +1,16 @@
 """
-AIA Pay App Checker — Total Completed vs Previous Amount Billed
+AIA G703 Pay App Checker — Total Completed vs Previous Amount Billed
 """
 
 import streamlit as st
-import pdfplumber
 import pandas as pd
+import re
 import openai
 
-st.title("AIA Pay App Checker — G703 Totals Match")
+st.title("AIA G703 Pay App Checker")
 
 st.write(
-    "Upload previous and current AIA G703 PDFs or Excel files. "
+    "Upload previous and current G703 PDFs or Excel files. "
     "The app checks if the total completed to date from the previous pay app matches "
     "the previous amount billed in the current pay app."
 )
@@ -30,29 +30,38 @@ prev_file = st.file_uploader("Previous G703 Pay App (PDF or Excel)", type=["pdf"
 curr_file = st.file_uploader("Current G703 Pay App (PDF or Excel)", type=["pdf", "xlsx"])
 
 # ---------------------
-# PDF parsing helpers
+# PDF parsing helper
 # ---------------------
-def parse_pdf_column_sum(file, column_index):
-    """Sum values from a specific column index across all lines in all pages."""
+def parse_pdf_g703_total(file, column="Total Completed to Date"):
+    """
+    Sum numbers from a PDF G703 based on column:
+    - 'Previous Amount Billed' -> first number in line
+    - 'Total Completed to Date' -> third number in line
+    """
     total = 0
+    column_index = 0 if column == "Previous Amount Billed" else 2
     try:
+        import pdfplumber
         with pdfplumber.open(file) as pdf:
             for page in pdf.pages:
-                table = page.extract_table()
-                if table:
-                    for row in table[1:]:  # skip header
-                        if row[column_index]:
-                            try:
-                                total += float(row[column_index].replace(",", "").replace("$", ""))
-                            except:
-                                pass
+                text = page.extract_text()
+                if not text:
+                    continue
+                for line in text.split("\n"):
+                    # Extract numbers from line
+                    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", line.replace(",", ""))
+                    if len(numbers) > column_index:
+                        try:
+                            total += float(numbers[column_index])
+                        except:
+                            continue
         return total
     except Exception as e:
         st.error(f"Error parsing PDF: {e}")
         return None
 
 # ---------------------
-# Excel parsing helpers
+# Excel parsing helper
 # ---------------------
 def parse_excel_column_sum(file, column_name):
     try:
@@ -74,16 +83,14 @@ curr_prev_total = None
 # Previous pay app → Total Completed to Date
 if prev_file:
     if prev_file.type == "application/pdf":
-        # G703 typically has "Total Completed to Date" in 3rd column (index 2)
-        prev_total = parse_pdf_column_sum(prev_file, column_index=2)
+        prev_total = parse_pdf_g703_total(prev_file, column="Total Completed to Date")
     else:
         prev_total = parse_excel_column_sum(prev_file, column_name="Total Completed to Date")
 
 # Current pay app → Previous Amount Billed
 if curr_file:
     if curr_file.type == "application/pdf":
-        # G703 typically has "Previous Amount Billed" in 1st column (index 0)
-        curr_prev_total = parse_pdf_column_sum(curr_file, column_index=0)
+        curr_prev_total = parse_pdf_g703_total(curr_file, column="Previous Amount Billed")
     else:
         curr_prev_total = parse_excel_column_sum(curr_file, column_name="Previous Amount Billed")
 
