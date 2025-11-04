@@ -1,5 +1,5 @@
 """
-AIA Pay App Reviewer — Streamlit Prototype with AI Summary (OpenAI 1.x+ compatible)
+AIA Pay App Reviewer — Streamlit Prototype with AI Summary (Streamlit Secrets + OpenAI 1.x+)
 
 This app allows you to:
 - Upload previous and current AIA G702/G703 PDFs
@@ -15,7 +15,6 @@ import pandas as pd
 import io
 import re
 from decimal import Decimal, InvalidOperation
-import os
 import openai
 
 st.title("AIA Pay App Reviewer")
@@ -23,6 +22,14 @@ st.title("AIA Pay App Reviewer")
 st.write(
     "Upload your previous and current AIA G702/G703 PDFs to validate totals, flag issues, and get an AI summary."
 )
+
+# ---------------------
+# Set OpenAI API key from Streamlit Secrets
+# ---------------------
+try:
+    openai.api_key = st.secrets["OPENAI_API_KEY"]
+except KeyError:
+    st.warning("OpenAI API key not found! Please add OPENAI_API_KEY in Streamlit Secrets.")
 
 # ---------------------
 # Upload PDFs
@@ -70,7 +77,7 @@ if prev_file and curr_file:
         "Ask the AI to review your pay app (e.g., 'Check for errors and summarize')"
     )
 
-    if user_prompt:
+    if user_prompt and openai.api_key:
         try:
             # Simple text summary of parsed data
             pdf_data_summary = (
@@ -81,7 +88,7 @@ if prev_file and curr_file:
 
             ai_input = f"{user_prompt}\n\nData summary:\n{pdf_data_summary}"
 
-            # --------- NEW OpenAI 1.x+ API ---------
+            # OpenAI 1.x+ API
             response = openai.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": ai_input}],
@@ -101,8 +108,10 @@ if prev_file and curr_file:
 st.markdown(
     """
 **Notes:**
-- Make sure your OpenAI API key is set in environment variables or Streamlit Secrets.
-- The AI summary is based on a simplified extracted data overview; for full accuracy, consider expanding `pdf_data_summary` with parsed table details.
+- Make sure your OpenAI API key is set in Streamlit Secrets (`OPENAI_API_KEY`).
+- The AI summary is based on a simplified extracted data overview; for full accuracy, you can expand `pdf_data_summary` with parsed table details.
 - This prototype can be extended to automatically compare line items, validate rollovers, and export results to CSV or Sage Intacct.
 """
 )
+
+
